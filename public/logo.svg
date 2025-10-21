@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="mamori-logo-title">
+  <title id="mamori-logo-title">mamori - 守りの盾のロゴ</title>
+  <path
+    d="M32 6l22 8v14c0 14-9 23-22 30C19 51 10 42 10 28V14z"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="3.2"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M22 32l7 7 13-15"
+    fill="none"
+    stroke="var(--logo-accent, #2f78b8)"
+    stroke-width="3.4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>
