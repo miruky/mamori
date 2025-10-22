@@ -71,6 +71,8 @@ export interface Enemy {
   id: number;
   def: EnemyDef;
   hp: number;
+  /** 出現時の最大HP。難易度で増減するため、HPバーの分母はここを使う。 */
+  maxHp: number;
   /** 経路上の到達距離(セル)。 */
   dist: number;
   /** 鈍化の残り秒数と倍率。 */
@@ -101,6 +103,19 @@ export interface SpawnGroup {
 export type Wave = SpawnGroup[];
 
 export type Status = 'playing' | 'won' | 'lost';
+
+export type Difficulty = 'easy' | 'normal' | 'hard';
+
+/** 難易度ごとの補正。標準(normal)は等倍で、既定の挙動と一致する。 */
+export interface DifficultyDef {
+  label: string;
+  /** 敵HPの倍率。 */
+  hpScale: number;
+  /** 賞金の倍率。難しいほど稼ぎにくい。 */
+  bountyScale: number;
+  startGold: number;
+  startLives: number;
+}
 
 /** ログ・通知の1行。 */
 export interface Notice {
