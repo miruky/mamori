@@ -9,7 +9,9 @@ import {
   MAX_LEVEL,
   upgradeCost,
 } from './lib/towers';
-import type { Enemy, Tower, TowerKind } from './lib/types';
+import { DIFFICULTIES, DIFFICULTY_ORDER } from './lib/enemies';
+import { parseRecords, recordOutcome, type Records } from './lib/records';
+import type { Difficulty, Enemy, Status, Tower, TowerKind } from './lib/types';
 
 const CELL = 44;
 const W = GRID_W * CELL;
@@ -77,6 +79,14 @@ function towerButtons(): string {
   }).join('');
 }
 
+function difficultyControl(): string {
+  const btns = DIFFICULTY_ORDER.map(
+    (d) =>
+      `<button class="seg-btn" type="button" data-diff="${d}" aria-pressed="false">${DIFFICULTIES[d].label}</button>`,
+  ).join('');
+  return `<div class="seg" id="difficulty" role="group" aria-label="難易度を選ぶ">${btns}</div>`;
+}
+
 const SHELL = `
 <header class="site-header">
   <div class="brand">
@@ -98,6 +108,7 @@ const SHELL = `
       <span class="stat gold"><span class="label">資金</span><span class="value" id="gold">0</span></span>
       <span class="stat lives"><span class="label">残機</span><span class="value" id="lives">0</span></span>
       <span class="stat wave"><span class="label">ウェーブ</span><span class="value" id="wave">0 / 0</span></span>
+      <span class="stat best"><span class="label">最高</span><span class="value" id="best">W0</span></span>
       <span class="spacer"></span>
       <span class="stat"><span class="label" id="speed-label">速度 1x</span></span>
     </div>
@@ -105,13 +116,19 @@ const SHELL = `
     <div class="banner" id="banner" role="status"></div>
   </section>
 
-  <aside class="pane side">
-    <section>
+  <aside class="side">
+    <section class="side-sec">
+      <h2>難易度</h2>
+      ${difficultyControl()}
+      <dl class="records" id="records"></dl>
+    </section>
+
+    <section class="side-sec">
       <h2>塔を建てる</h2>
       <div class="palette" id="palette">${towerButtons()}</div>
     </section>
 
-    <section>
+    <section class="side-sec">
       <h2>操作</h2>
       <div class="controls">
         <button class="wave-btn primary" id="wave-btn" type="button">ウェーブ開始</button>
@@ -122,13 +139,13 @@ const SHELL = `
       </div>
     </section>
 
-    <section id="sel-section" hidden>
+    <section class="side-sec" id="sel-section" hidden>
       <h2>選択中の塔</h2>
       <div class="selinfo" id="selinfo"></div>
     </section>
 
-    <section>
-      <h2>記録</h2>
+    <section class="side-sec">
+      <h2>実況</h2>
       <div class="log" id="log" aria-hidden="true"></div>
       <div id="announcer" aria-live="polite" class="sr-only"></div>
     </section>
@@ -146,8 +163,16 @@ function el<T extends HTMLElement>(id: string): T {
   return node as T;
 }
 
+function loadDifficulty(): Difficulty {
+  const v = store.get('mamori-difficulty');
+  return v === 'easy' || v === 'hard' ? v : 'normal';
+}
+
 class UI {
-  private game = new Game();
+  private difficulty: Difficulty = loadDifficulty();
+  private records: Records = parseRecords(store.get('mamori-records'));
+  private game = new Game({ difficulty: this.difficulty });
+  private prevStatus: Status = 'playing';
   private selectedKind: TowerKind | null = null;
   private selectedTowerId: number | null = null;
   private hoverCell: { x: number; y: number } | null = null;
@@ -171,9 +196,47 @@ class UI {
     this.buildField();
     this.bind();
     this.refreshTowers();
+    this.syncDifficulty();
     this.render(); // 最初のフレームを待たずに初期状態を描く
     this.lastTime = performance.now();
     requestAnimationFrame((t) => this.frame(t));
+  }
+
+  private syncDifficulty(): void {
+    for (const btn of document.querySelectorAll<HTMLButtonElement>('#difficulty .seg-btn')) {
+      const on = btn.dataset.diff === this.difficulty;
+      btn.classList.toggle('selected', on);
+      btn.setAttribute('aria-pressed', String(on));
+    }
+    this.renderRecords();
+  }
+
+  private renderRecords(): void {
+    const best = this.records.bestWave[this.difficulty];
+    const wins = this.records.wins[this.difficulty];
+    el('records').innerHTML =
+      `<div><dt>最高到達</dt><dd>${best ? `ウェーブ ${best}` : '—'}</dd></div>` +
+      `<div><dt>勝利</dt><dd>${wins} 回</dd></div>`;
+    el('best').textContent = `W${best}`;
+  }
+
+  private setDifficulty(d: Difficulty): void {
+    if (d === this.difficulty) return;
+    this.difficulty = d;
+    store.set('mamori-difficulty', d);
+    this.reset(); // 難易度の変更は新しいゲームから始める
+    this.syncDifficulty();
+  }
+
+  private recordEndIfFinished(): void {
+    const status = this.game.status;
+    if (status !== 'playing' && this.prevStatus === 'playing') {
+      const reached = status === 'won' ? this.game.totalWaves : this.game.waveIndex + 1;
+      this.records = recordOutcome(this.records, this.difficulty, status, Math.max(0, reached));
+      store.set('mamori-records', JSON.stringify(this.records));
+      this.renderRecords();
+    }
+    this.prevStatus = status;
   }
 
   private buildField(): void {
@@ -261,6 +324,7 @@ class UI {
     const dt = Math.min((now - this.lastTime) / 1000, 0.1);
     this.lastTime = now;
     if (!this.paused && this.game.status === 'playing') this.game.step(dt * this.speed);
+    this.recordEndIfFinished();
     this.render();
     requestAnimationFrame((t) => this.frame(t));
   }
@@ -285,7 +349,7 @@ class UI {
       node.setAttribute('transform', `translate(${center(p.x)} ${center(p.y)})`);
       const barW = CELL * 0.56;
       const fill = node.querySelector('.hp-fill') as SVGRectElement;
-      fill.setAttribute('width', String(Math.max(0, (e.hp / e.def.hp) * barW)));
+      fill.setAttribute('width', String(Math.max(0, (e.hp / e.maxHp) * barW)));
       const slow = node.querySelector('.enemy-slow') as SVGCircleElement;
       slow.setAttribute('opacity', e.slowTimer > 0 ? '1' : '0');
     }
@@ -411,9 +475,9 @@ class UI {
         <span>射程</span><span class="v">${effectiveRange(def, sel.level).toFixed(1)}</span>
         <span>連射</span><span class="v">${def.fireRate.toFixed(1)}/秒</span>
       </div>
-      <div class="row" style="display:flex;gap:8px">
-        ${up !== null ? `<button id="upgrade" type="button" style="flex:1">強化 ${up}</button>` : ''}
-        <button id="sell" type="button" style="flex:1">売却 ${refund}</button>
+      <div class="actions">
+        ${up !== null ? `<button id="upgrade" type="button">強化 ${up}</button>` : ''}
+        <button id="sell" type="button">売却 ${refund}</button>
       </div>`;
     const upBtn = document.getElementById('upgrade') as HTMLButtonElement | null;
     if (upBtn) {
@@ -501,7 +565,8 @@ class UI {
   }
 
   private reset(): void {
-    this.game = new Game();
+    this.game = new Game({ difficulty: this.difficulty });
+    this.prevStatus = 'playing';
     this.selectedKind = null;
     this.selectedTowerId = null;
     this.lastNotices = 0;
@@ -530,6 +595,11 @@ class UI {
       if (!btn) return;
       const kind = btn.dataset.kind as TowerKind;
       this.selectKind(this.selectedKind === kind ? null : kind);
+    });
+
+    el('difficulty').addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.seg-btn') as HTMLButtonElement | null;
+      if (btn) this.setDifficulty(btn.dataset.diff as Difficulty);
     });
 
     el<HTMLButtonElement>('wave-btn').addEventListener('click', () => {

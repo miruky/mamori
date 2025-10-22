@@ -1,4 +1,5 @@
 export { Game } from './game';
+export type { GameOptions } from './game';
 export { GRID_W, GRID_H, PATH, PATH_LENGTH, pointAt, pathCells, isBuildableCell } from './path';
 export {
   TOWERS,
@@ -8,7 +9,17 @@ export {
   upgradeCost,
   MAX_LEVEL,
 } from './towers';
-export { ENEMIES, WAVES, START_GOLD, START_LIVES, WAVE_CLEAR_BONUS } from './enemies';
+export {
+  ENEMIES,
+  WAVES,
+  START_GOLD,
+  START_LIVES,
+  WAVE_CLEAR_BONUS,
+  DIFFICULTIES,
+  DIFFICULTY_ORDER,
+} from './enemies';
+export { emptyRecords, recordOutcome, parseRecords } from './records';
+export type { Records } from './records';
 export type {
   Vec,
   TowerKind,
@@ -22,4 +33,6 @@ export type {
   Wave,
   Status,
   Notice,
+  Difficulty,
+  DifficultyDef,
 } from './types';
