@@ -35,6 +35,16 @@ export interface GameOptions {
   difficulty?: Difficulty;
 }
 
+/** ウェーブの合間に残せる局面のスナップショット。進行中の敵・弾は持たない。 */
+export interface GameSnapshot {
+  difficulty: Difficulty;
+  gold: number;
+  lives: number;
+  waveIndex: number;
+  status: Status;
+  towers: { kind: TowerKind; cx: number; cy: number; level: number; invested: number }[];
+}
+
 export class Game {
   readonly difficulty: Difficulty;
   gold: number;
@@ -126,6 +136,48 @@ export class Game {
     this.towers.splice(idx, 1);
     this.notify(`塔を売却して${refund}を得た。`, 'info');
     return true;
+  }
+
+  // --- 保存と復元 -----------------------------------------------------------
+
+  /** ウェーブの合間の局面を書き出す。進行中の敵・弾は含めない。 */
+  snapshot(): GameSnapshot {
+    return {
+      difficulty: this.difficulty,
+      gold: this.gold,
+      lives: this.lives,
+      waveIndex: this.waveIndex,
+      status: this.status,
+      towers: this.towers.map((t) => ({
+        kind: t.kind,
+        cx: t.cx,
+        cy: t.cy,
+        level: t.level,
+        invested: t.invested,
+      })),
+    };
+  }
+
+  /** スナップショットから局面を組み立て直す。次のウェーブから再開できる。 */
+  static fromSnapshot(s: GameSnapshot): Game {
+    const g = new Game({ difficulty: s.difficulty });
+    g.gold = s.gold;
+    g.lives = s.lives;
+    g.waveIndex = s.waveIndex;
+    g.status = s.status;
+    for (const t of s.towers) {
+      g.towers.push({
+        id: g.nextId++,
+        kind: t.kind,
+        cx: t.cx,
+        cy: t.cy,
+        level: t.level,
+        cooldown: 0,
+        invested: t.invested,
+      });
+      g.occupied.add(`${t.cx},${t.cy}`);
+    }
+    return g;
   }
 
   // --- ウェーブ -------------------------------------------------------------
@@ -340,6 +392,52 @@ export class Game {
     this.notices.push({ text, tint });
     if (this.notices.length > 50) this.notices.shift();
   }
+}
+
+function isInt(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v);
+}
+
+/** localStorage等の文字列から安全にスナップショットを復元する。壊れていればnullを返す。 */
+export function parseSnapshot(raw: string | null): GameSnapshot | null {
+  if (!raw) return null;
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof data !== 'object' || data === null) return null;
+  const d = data as Record<string, unknown>;
+  const difficulty = d.difficulty;
+  if (difficulty !== 'easy' && difficulty !== 'normal' && difficulty !== 'hard') return null;
+  const status = d.status;
+  if (status !== 'playing' && status !== 'won' && status !== 'lost') return null;
+  if (!isInt(d.gold) || !isInt(d.lives) || !isInt(d.waveIndex)) return null;
+  if (d.gold < 0 || d.lives < 0 || d.waveIndex < -1 || d.waveIndex >= WAVES.length) return null;
+  if (!Array.isArray(d.towers)) return null;
+
+  const seen = new Set<string>();
+  const towers: GameSnapshot['towers'] = [];
+  for (const item of d.towers) {
+    if (typeof item !== 'object' || item === null) return null;
+    const t = item as Record<string, unknown>;
+    if (typeof t.kind !== 'string' || !(t.kind in TOWERS)) return null;
+    if (!isInt(t.cx) || !isInt(t.cy) || !isBuildableCell(t.cx, t.cy)) return null;
+    const key = `${t.cx},${t.cy}`;
+    if (seen.has(key)) return null; // 同じマスに二重設置は不正
+    seen.add(key);
+    if (!isInt(t.level) || t.level < 1 || t.level > MAX_LEVEL) return null;
+    if (!isInt(t.invested) || t.invested < 0) return null;
+    towers.push({
+      kind: t.kind as TowerKind,
+      cx: t.cx,
+      cy: t.cy,
+      level: t.level,
+      invested: t.invested,
+    });
+  }
+  return { difficulty, gold: d.gold, lives: d.lives, waveIndex: d.waveIndex, status, towers };
 }
 
 export { GRID_W, GRID_H, PATH_LENGTH };
