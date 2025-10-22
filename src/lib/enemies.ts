@@ -1,4 +1,4 @@
-import type { EnemyDef, Wave } from './types';
+import type { Difficulty, DifficultyDef, EnemyDef, Wave } from './types';
 
 // 敵の種別。速い斥候、硬い装甲、群れ、重い巨体、そして最終ウェーブの主。
 export const ENEMIES: Record<string, EnemyDef> = {
@@ -115,3 +115,19 @@ export const WAVES: readonly Wave[] = [
 export const WAVE_CLEAR_BONUS = 12;
 export const START_GOLD = 110;
 export const START_LIVES = 20;
+
+// 難易度。normalは等倍・既定値で、補正なしの素の挙動と一致する。
+// easyは敵が脆く資金に余裕があり、hardは硬く稼ぎにくく残機も少ない。
+export const DIFFICULTIES: Record<Difficulty, DifficultyDef> = {
+  easy: { label: 'やさしい', hpScale: 0.8, bountyScale: 1.15, startGold: 140, startLives: 25 },
+  normal: {
+    label: 'ふつう',
+    hpScale: 1,
+    bountyScale: 1,
+    startGold: START_GOLD,
+    startLives: START_LIVES,
+  },
+  hard: { label: 'むずかしい', hpScale: 1.35, bountyScale: 0.9, startGold: 95, startLives: 15 },
+};
+
+export const DIFFICULTY_ORDER: readonly Difficulty[] = ['easy', 'normal', 'hard'];
