@@ -1,7 +1,17 @@
 import { GRID_H, GRID_W, isBuildableCell, PATH_LENGTH, pointAt } from './path';
 import { effectiveDamage, effectiveRange, MAX_LEVEL, TOWERS, upgradeCost } from './towers';
-import { ENEMIES, START_GOLD, START_LIVES, WAVE_CLEAR_BONUS, WAVES } from './enemies';
-import type { Enemy, Notice, Projectile, Status, Tower, TowerKind, Vec } from './types';
+import { DIFFICULTIES, ENEMIES, WAVE_CLEAR_BONUS, WAVES } from './enemies';
+import type {
+  Difficulty,
+  DifficultyDef,
+  Enemy,
+  Notice,
+  Projectile,
+  Status,
+  Tower,
+  TowerKind,
+  Vec,
+} from './types';
 
 const HIT_DIST = 0.4;
 
@@ -21,9 +31,14 @@ function dist2(ax: number, ay: number, bx: number, by: number): number {
  * 時間を進めるのは step(dt) に限る。乱数を使わないため、同じ操作と同じ
  * 時間刻みからは常に同じ展開になり、そのままテストできる。
  */
+export interface GameOptions {
+  difficulty?: Difficulty;
+}
+
 export class Game {
-  gold = START_GOLD;
-  lives = START_LIVES;
+  readonly difficulty: Difficulty;
+  gold: number;
+  lives: number;
   /** 現在/直近のウェーブ番号(0始まり、未開始は-1)。 */
   waveIndex = -1;
   status: Status = 'playing';
@@ -33,11 +48,19 @@ export class Game {
   waveActive = false;
   notices: Notice[] = [];
 
+  private readonly diff: DifficultyDef;
   private waveTime = 0;
   private schedule: SpawnEvent[] = [];
   private spawnCursor = 0;
   private nextId = 1;
   private occupied = new Set<string>();
+
+  constructor(opts: GameOptions = {}) {
+    this.difficulty = opts.difficulty ?? 'normal';
+    this.diff = DIFFICULTIES[this.difficulty];
+    this.gold = this.diff.startGold;
+    this.lives = this.diff.startLives;
+  }
 
   get totalWaves(): number {
     return WAVES.length;
@@ -164,10 +187,12 @@ export class Game {
 
   private spawn(kind: string): void {
     const def = ENEMIES[kind]!;
+    const hp = Math.max(1, Math.round(def.hp * this.diff.hpScale));
     this.enemies.push({
       id: this.nextId++,
       def,
-      hp: def.hp,
+      hp,
+      maxHp: hp,
       dist: 0,
       slowTimer: 0,
       slowFactor: 1,
@@ -287,8 +312,8 @@ export class Game {
     const alive: Enemy[] = [];
     for (const e of this.enemies) {
       if (e.hp <= 0 && e.dist < PATH_LENGTH) {
-        // 倒した(出口には抜けていない)敵は賞金になる。
-        this.gold += e.def.bounty;
+        // 倒した(出口には抜けていない)敵は賞金になる。難易度で増減する。
+        this.gold += Math.max(1, Math.round(e.def.bounty * this.diff.bountyScale));
       } else {
         alive.push(e);
       }
