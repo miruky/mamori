@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { Game } from './game';
-import { ENEMIES, START_GOLD, START_LIVES } from './enemies';
+import { DIFFICULTIES, ENEMIES, START_GOLD, START_LIVES } from './enemies';
 import { TOWERS, MAX_LEVEL, upgradeCost } from './towers';
 import { PATH_LENGTH } from './path';
 import type { Enemy, TowerKind } from './types';
 
 function enemy(kind: string, dist: number, id = 1): Enemy {
   const def = ENEMIES[kind]!;
-  return { id, def, hp: def.hp, dist, slowTimer: 0, slowFactor: 1 };
+  return { id, def, hp: def.hp, maxHp: def.hp, dist, slowTimer: 0, slowFactor: 1 };
 }
 
 describe('設置・売却・強化', () => {
@@ -147,5 +147,45 @@ describe('勝敗の決着', () => {
     }
     expect(g.status).toBe('won');
     expect(g.lives).toBeGreaterThan(0);
+  });
+});
+
+describe('難易度', () => {
+  it('既定はnormalで、補正なしの素の値になる', () => {
+    const g = new Game();
+    expect(g.difficulty).toBe('normal');
+    expect(g.gold).toBe(START_GOLD);
+    expect(g.lives).toBe(START_LIVES);
+  });
+
+  it('easyは資金と残機が多く、敵が脆い', () => {
+    const g = new Game({ difficulty: 'easy' });
+    expect(g.gold).toBe(DIFFICULTIES.easy.startGold);
+    expect(g.lives).toBe(DIFFICULTIES.easy.startLives);
+    g.startWave();
+    g.step(0.1);
+    const e = g.enemies[0]!;
+    expect(e.maxHp).toBeLessThan(ENEMIES.grunt!.hp);
+    expect(e.hp).toBe(e.maxHp);
+  });
+
+  it('hardは敵が硬く、賞金が減る', () => {
+    const g = new Game({ difficulty: 'hard' });
+    expect(g.gold).toBe(DIFFICULTIES.hard.startGold);
+    g.placeTower('sniper', 5, 2);
+    const before = g.gold;
+    g.enemies.push({
+      id: 99,
+      def: ENEMIES.grunt!,
+      hp: Math.round(ENEMIES.grunt!.hp * DIFFICULTIES.hard.hpScale),
+      maxHp: Math.round(ENEMIES.grunt!.hp * DIFFICULTIES.hard.hpScale),
+      dist: 5,
+      slowTimer: 0,
+      slowFactor: 1,
+    });
+    for (let i = 0; i < 100 && g.enemies.length > 0; i++) g.step(0.1);
+    const earned = g.gold - before;
+    expect(earned).toBeLessThan(ENEMIES.grunt!.bounty); // 賞金が割り引かれる
+    expect(earned).toBeGreaterThan(0);
   });
 });
