@@ -1,5 +1,5 @@
-export { Game } from './game';
-export type { GameOptions } from './game';
+export { Game, parseSnapshot } from './game';
+export type { GameOptions, GameSnapshot } from './game';
 export { GRID_W, GRID_H, PATH, PATH_LENGTH, pointAt, pathCells, isBuildableCell } from './path';
 export {
   TOWERS,
