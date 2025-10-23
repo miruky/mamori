@@ -51,4 +51,25 @@ describe('UI のDOM結線', () => {
       (document.getElementById('wave-btn') as HTMLButtonElement).click();
     }).not.toThrow();
   });
+
+  it('難易度をセグメントで切り替えられる', () => {
+    const hard = document.querySelector('.seg-btn[data-diff="hard"]') as HTMLButtonElement;
+    hard.click();
+    expect(hard.getAttribute('aria-pressed')).toBe('true');
+    const normal = document.querySelector('.seg-btn[data-diff="normal"]') as HTMLButtonElement;
+    expect(normal.getAttribute('aria-pressed')).toBe('false');
+    normal.click(); // 後続のテストのため標準へ戻す
+  });
+
+  it('盤面フォーカス中の方向キーとEnterで塔を置ける', () => {
+    document.querySelector<HTMLButtonElement>('.tower-btn[data-kind="arrow"]')!.click();
+    const field = document.getElementById('field') as unknown as HTMLElement;
+    field.focus();
+    if (document.activeElement !== field) return; // 環境がSVGフォーカス未対応なら検証を省く
+    const before = document.querySelectorAll('.tower').length;
+    press('ArrowUp'); // 中央(経路上)から上の空きマスへ
+    press('ArrowUp');
+    press('Enter');
+    expect(document.querySelectorAll('.tower').length).toBeGreaterThan(before);
+  });
 });

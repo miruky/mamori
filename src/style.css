@@ -305,6 +305,15 @@ button.primary:disabled {
   font-size: 23px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  display: inline-block;
+  transform-origin: left center;
+}
+
+.hud .value.bump {
+  animation: valueBump 0.34s var(--ease);
+}
+.hud .value.flash {
+  animation: valueFlash 0.5s var(--ease);
 }
 
 .hud .stat.gold .value {
@@ -377,6 +386,21 @@ button.primary:disabled {
   stroke-width: 1.4;
   stroke-dasharray: 5 4;
   opacity: 0.85;
+}
+
+.board-cursor {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 7 5;
+  opacity: 0;
+  transition:
+    opacity 0.12s var(--ease),
+    x 0.09s var(--ease),
+    y 0.09s var(--ease);
+}
+.board-cursor.show {
+  opacity: 0.95;
 }
 
 .t-arrow {
@@ -472,6 +496,20 @@ button.primary:disabled {
 .side-sec {
   padding: 18px 0;
   border-top: 1px solid var(--line);
+  animation: fadeIn 0.5s var(--ease) both;
+}
+
+.side-sec:nth-child(1) {
+  animation-delay: 0.06s;
+}
+.side-sec:nth-child(2) {
+  animation-delay: 0.12s;
+}
+.side-sec:nth-child(3) {
+  animation-delay: 0.18s;
+}
+.side-sec:nth-child(5) {
+  animation-delay: 0.24s;
 }
 
 .side-sec:first-child {
@@ -769,6 +807,35 @@ button.primary:disabled {
   }
   100% {
     transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes valueBump {
+  0% {
+    transform: none;
+  }
+  30% {
+    transform: translateY(-2px) scale(1.1);
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes valueFlash {
+  0%,
+  100% {
+    color: var(--danger);
+  }
+  35% {
+    color: var(--ink);
+    transform: scale(1.12);
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
     opacity: 1;
   }
 }

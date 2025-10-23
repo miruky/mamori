@@ -1,5 +1,5 @@
 import './style.css';
-import { Game, GRID_W, GRID_H } from './lib/game';
+import { Game, GRID_W, GRID_H, parseSnapshot } from './lib/game';
 import { PATH } from './lib/path';
 import {
   TOWERS,
@@ -48,6 +48,12 @@ function svg<K extends keyof SVGElementTagNameMap>(
 function center(cell: number): number {
   return (cell + 0.5) * CELL;
 }
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+const SAVE_KEY = 'mamori-save';
 
 const LOGO = `
 <svg class="logo" viewBox="0 0 64 64" role="img" aria-labelledby="logo-title">
@@ -112,7 +118,7 @@ const SHELL = `
       <span class="spacer"></span>
       <span class="stat"><span class="label" id="speed-label">速度 1x</span></span>
     </div>
-    <svg id="field" viewBox="0 0 ${W} ${H}" role="application" aria-label="防衛盤面。塔を配置して敵を止める"></svg>
+    <svg id="field" viewBox="0 0 ${W} ${H}" tabindex="0" role="application" aria-label="防衛盤面。塔を配置して敵を止める。方向キーで移動、Enterで設置"></svg>
     <div class="banner" id="banner" role="status"></div>
   </section>
 
@@ -153,7 +159,7 @@ const SHELL = `
 </main>
 
 <footer class="site-footer">
-  数字キー1-4で塔を選び、盤面をクリックで設置。スペースでウェーブ開始/一時停止。
+  数字キー1-4で塔を選び、盤面をクリックで設置。盤面にフォーカスすれば方向キーで移動・Enterで設置。スペースでウェーブ開始/一時停止。
   <a href="https://github.com/miruky/mamori">ソース</a>
 </footer>`;
 
@@ -172,20 +178,26 @@ class UI {
   private difficulty: Difficulty = loadDifficulty();
   private records: Records = parseRecords(store.get('mamori-records'));
   private game = new Game({ difficulty: this.difficulty });
+  private resumed = false;
   private prevStatus: Status = 'playing';
+  private prevWaveActive = false;
   private selectedKind: TowerKind | null = null;
   private selectedTowerId: number | null = null;
   private hoverCell: { x: number; y: number } | null = null;
+  private cursor = { x: Math.floor(GRID_W / 2), y: Math.floor(GRID_H / 2) };
   private speed = 1;
   private paused = false;
   private lastTime = 0;
   private lastNotices = 0;
+  private lastGold = -1;
+  private lastLives = -1;
 
   private field = el<HTMLElement>('field') as unknown as SVGSVGElement;
   private gridLayer = svg('g', { 'aria-hidden': 'true' });
   private pathLayer = svg('g', { 'aria-hidden': 'true' });
   private rangeLayer = svg('g', { 'aria-hidden': 'true' });
   private hintRect = svg('rect', { class: 'build-hint', width: CELL, height: CELL, rx: 4 });
+  private cursorRect = svg('rect', { class: 'board-cursor', width: CELL, height: CELL, rx: 4 });
   private towerLayer = svg('g');
   private enemyLayer = svg('g');
   private projLayer = svg('g');
@@ -193,13 +205,39 @@ class UI {
   private projEls = new Map<number, SVGCircleElement>();
 
   constructor() {
+    this.tryResume();
     this.buildField();
     this.bind();
     this.refreshTowers();
     this.syncDifficulty();
+    if (this.resumed) this.game.notices.push({ text: '前回の続きから再開した。', tint: 'info' });
     this.render(); // 最初のフレームを待たずに初期状態を描く
     this.lastTime = performance.now();
     requestAnimationFrame((t) => this.frame(t));
+  }
+
+  // --- 保存・復元 -----------------------------------------------------------
+
+  private tryResume(): void {
+    const saved = parseSnapshot(store.get(SAVE_KEY));
+    if (saved && saved.status === 'playing' && (saved.towers.length > 0 || saved.waveIndex >= 0)) {
+      this.difficulty = saved.difficulty;
+      this.game = Game.fromSnapshot(saved);
+      this.resumed = true;
+    }
+  }
+
+  private saveCheckpoint(): void {
+    if (this.game.status !== 'playing' || this.game.waveActive) return;
+    if (this.game.towers.length === 0 && this.game.waveIndex < 0) {
+      this.clearSave(); // まだ何もしていない局面は残さない
+      return;
+    }
+    store.set(SAVE_KEY, JSON.stringify(this.game.snapshot()));
+  }
+
+  private clearSave(): void {
+    store.set(SAVE_KEY, '');
   }
 
   private syncDifficulty(): void {
@@ -235,6 +273,7 @@ class UI {
       this.records = recordOutcome(this.records, this.difficulty, status, Math.max(0, reached));
       store.set('mamori-records', JSON.stringify(this.records));
       this.renderRecords();
+      this.clearSave(); // 決着がついたら保存は消す
     }
     this.prevStatus = status;
   }
@@ -264,6 +303,7 @@ class UI {
       this.pathLayer,
       this.rangeLayer,
       this.hintRect,
+      this.cursorRect,
       this.towerLayer,
       this.projLayer,
       this.enemyLayer,
@@ -277,6 +317,7 @@ class UI {
     for (const t of this.game.towers) this.towerLayer.appendChild(this.towerNode(t));
     this.refreshRange();
     this.refreshSelInfo();
+    this.saveCheckpoint();
   }
 
   private towerNode(t: Tower): SVGGElement {
@@ -324,6 +365,8 @@ class UI {
     const dt = Math.min((now - this.lastTime) / 1000, 0.1);
     this.lastTime = now;
     if (!this.paused && this.game.status === 'playing') this.game.step(dt * this.speed);
+    if (this.prevWaveActive && !this.game.waveActive) this.saveCheckpoint(); // ウェーブを凌いだ局面を残す
+    this.prevWaveActive = this.game.waveActive;
     this.recordEndIfFinished();
     this.render();
     requestAnimationFrame((t) => this.frame(t));
@@ -397,11 +440,22 @@ class UI {
     }
   }
 
+  private bump(id: string, cls: string): void {
+    const node = el(id);
+    node.classList.remove(cls);
+    void node.offsetWidth; // 同じ値の連続変化でもアニメを再起動させる
+    node.classList.add(cls);
+  }
+
   private renderHud(): void {
     const g = this.game;
     el('gold').textContent = String(g.gold);
     el('lives').textContent = String(g.lives);
     el('wave').textContent = `${Math.max(0, g.waveIndex + 1)} / ${g.totalWaves}`;
+    if (this.lastGold >= 0 && g.gold !== this.lastGold) this.bump('gold', 'bump');
+    if (this.lastLives >= 0 && g.lives < this.lastLives) this.bump('lives', 'flash');
+    this.lastGold = g.gold;
+    this.lastLives = g.lives;
 
     const waveBtn = el<HTMLButtonElement>('wave-btn');
     if (!g.hasNextWave && !g.waveActive) {
@@ -553,6 +607,54 @@ class UI {
     this.refreshRange();
   }
 
+  // --- キーボードでの盤面操作 ----------------------------------------------
+
+  private showCursor(): void {
+    this.cursorRect.classList.add('show');
+    this.cursorRect.setAttribute('x', String(this.cursor.x * CELL));
+    this.cursorRect.setAttribute('y', String(this.cursor.y * CELL));
+    this.hoverCell = { ...this.cursor };
+    if (this.selectedKind) {
+      this.hintRect.setAttribute('x', String(this.cursor.x * CELL));
+      this.hintRect.setAttribute('y', String(this.cursor.y * CELL));
+      this.hintRect.classList.add('show');
+      this.hintRect.classList.toggle('blocked', !this.game.canPlace(this.cursor.x, this.cursor.y));
+    }
+    this.refreshRange();
+  }
+
+  private handleBoardKey(e: KeyboardEvent): boolean {
+    const moves: Record<string, [number, number]> = {
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+    };
+    const m = moves[e.key];
+    if (m) {
+      e.preventDefault();
+      this.cursor = {
+        x: clamp(this.cursor.x + m[0], 0, GRID_W - 1),
+        y: clamp(this.cursor.y + m[1], 0, GRID_H - 1),
+      };
+      this.showCursor();
+      return true;
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      const { x, y } = this.cursor;
+      const existing = this.game.towerAt(x, y);
+      if (this.selectedKind && this.game.canPlace(x, y)) {
+        this.game.placeTower(this.selectedKind, x, y);
+        this.refreshTowers();
+      } else if (existing) {
+        this.selectTower(existing.id);
+      }
+      return true;
+    }
+    return false;
+  }
+
   private setSpeed(s: number): void {
     this.speed = s;
     el('speed').textContent = s === 1 ? '2倍速' : s === 2 ? '3倍速' : '等速';
@@ -567,9 +669,12 @@ class UI {
   private reset(): void {
     this.game = new Game({ difficulty: this.difficulty });
     this.prevStatus = 'playing';
+    this.prevWaveActive = false;
     this.selectedKind = null;
     this.selectedTowerId = null;
     this.lastNotices = 0;
+    this.lastGold = -1;
+    this.lastLives = -1;
     this.paused = false;
     this.setSpeed(1);
     el('pause').textContent = '一時停止';
@@ -589,6 +694,8 @@ class UI {
       this.hoverCell = null;
       this.hintRect.classList.remove('show', 'blocked');
     });
+    this.field.addEventListener('focus', () => this.showCursor());
+    this.field.addEventListener('blur', () => this.cursorRect.classList.remove('show'));
 
     el('palette').addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('.tower-btn') as HTMLButtonElement | null;
@@ -617,6 +724,8 @@ class UI {
   }
 
   private onKey(e: KeyboardEvent): void {
+    // 盤面にフォーカスがあるときは方向キーとEnterを盤面操作に使う。
+    if (document.activeElement === this.field && this.handleBoardKey(e)) return;
     const digit = /^Digit([1-4])$/.exec(e.code);
     if (digit) {
       const kind = TOWER_KINDS[Number(digit[1]) - 1]!;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Game } from './game';
+import { Game, parseSnapshot } from './game';
 import { DIFFICULTIES, ENEMIES, START_GOLD, START_LIVES } from './enemies';
 import { TOWERS, MAX_LEVEL, upgradeCost } from './towers';
 import { PATH_LENGTH } from './path';
@@ -187,5 +187,71 @@ describe('難易度', () => {
     const earned = g.gold - before;
     expect(earned).toBeLessThan(ENEMIES.grunt!.bounty); // 賞金が割り引かれる
     expect(earned).toBeGreaterThan(0);
+  });
+});
+
+describe('保存と復元', () => {
+  it('スナップショットから局面を組み立て直せる', () => {
+    const g = new Game({ difficulty: 'hard' });
+    g.gold = 200;
+    g.placeTower('sniper', 5, 2);
+    g.placeTower('frost', 7, 3);
+    g.gold = 999;
+    g.upgradeTower(g.towerAt(5, 2)!.id);
+    g.startWave(); // waveIndexを0へ進める
+    g.waveActive = false; // 合間に保存する想定
+
+    const restored = Game.fromSnapshot(g.snapshot());
+    expect(restored.difficulty).toBe('hard');
+    expect(restored.gold).toBe(g.gold);
+    expect(restored.lives).toBe(g.lives);
+    expect(restored.waveIndex).toBe(0);
+    expect(restored.towerAt(5, 2)?.kind).toBe('sniper');
+    expect(restored.towerAt(5, 2)?.level).toBe(2);
+    expect(restored.canPlace(7, 3)).toBe(false); // 復元した塔でマスが埋まる
+    expect(restored.startWave()).toBe(true); // 次のウェーブから続けられる
+    expect(restored.waveIndex).toBe(1);
+  });
+
+  it('JSON文字列を往復できる', () => {
+    const g = new Game();
+    g.placeTower('arrow', 5, 2);
+    const back = parseSnapshot(JSON.stringify(g.snapshot()));
+    expect(back).toEqual(g.snapshot());
+  });
+
+  it('壊れた・不正な保存値はnullになる', () => {
+    expect(parseSnapshot(null)).toBeNull();
+    expect(parseSnapshot('{ broken')).toBeNull();
+    expect(parseSnapshot('{"difficulty":"impossible"}')).toBeNull();
+    // 経路上のマスに塔がある保存値は不正
+    expect(
+      parseSnapshot(
+        JSON.stringify({
+          difficulty: 'normal',
+          gold: 100,
+          lives: 20,
+          waveIndex: -1,
+          status: 'playing',
+          towers: [{ kind: 'arrow', cx: 12, cy: 1, level: 1, invested: 20 }],
+        }),
+      ),
+    ).toBeNull();
+    // 同じマスに二重設置の保存値は不正
+    expect(
+      parseSnapshot(
+        JSON.stringify({
+          difficulty: 'normal',
+          gold: 100,
+          lives: 20,
+          waveIndex: -1,
+          status: 'playing',
+          towers: [
+            { kind: 'arrow', cx: 5, cy: 2, level: 1, invested: 20 },
+            { kind: 'frost', cx: 5, cy: 2, level: 1, invested: 35 },
+          ],
+        }),
+      ),
+    ).toBeNull();
   });
 });
